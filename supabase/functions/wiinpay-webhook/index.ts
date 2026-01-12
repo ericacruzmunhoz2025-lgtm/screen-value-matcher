@@ -6,28 +6,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Mapear status do SyncPay para nosso formato
-const mapSyncPayStatus = (status: string): string => {
+// Mapear status do Wiinpay para nosso formato
+const mapWiinpayStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
-    'PENDING': 'pending',
-    'WAITING_FOR_APPROVAL': 'pending',
-    'APPROVED': 'approved',
-    'PAID': 'paid',
-    'COMPLETED': 'paid',
-    'REJECTED': 'rejected',
-    'CANCELLED': 'cancelled',
-    'CANCELED': 'cancelled',
-    'EXPIRED': 'expired',
-    'REFUNDED': 'refunded',
+    'pending': 'pending',
+    'waiting_payment': 'pending',
+    'paid': 'paid',
+    'approved': 'paid',
+    'completed': 'paid',
+    'rejected': 'rejected',
+    'cancelled': 'cancelled',
+    'canceled': 'cancelled',
+    'expired': 'expired',
+    'refunded': 'refunded',
   };
-  return statusMap[status.toUpperCase()] || status.toLowerCase();
+  return statusMap[status.toLowerCase()] || status.toLowerCase();
 };
 
 // Mapear status para UTMify
 const mapStatusToUtmify = (status: string): string | null => {
   const utmifyStatusMap: Record<string, string> = {
     'pending': 'waiting_payment',
-    'approved': 'approved',
     'paid': 'approved',
   };
   return utmifyStatusMap[status] || null;
@@ -120,12 +119,12 @@ serve(async (req) => {
   try {
     const payload = await req.json();
     
-    console.log('Webhook SyncPay recebido:', JSON.stringify(payload));
+    console.log('Webhook Wiinpay recebido:', JSON.stringify(payload));
 
-    // SyncPay envia dados no formato { data: { id, status, ... } }
-    const webhookData = payload.data || payload;
+    // Wiinpay pode enviar em formatos diferentes
+    const webhookData = payload.transaction?.[0] || payload.data || payload;
     
-    const transactionId = webhookData.id || webhookData.identifier;
+    const transactionId = webhookData.id || webhookData.identifier || webhookData.uuid;
     const rawStatus = webhookData.status;
 
     if (!transactionId || !rawStatus) {
@@ -136,7 +135,7 @@ serve(async (req) => {
       );
     }
 
-    const status = mapSyncPayStatus(rawStatus);
+    const status = mapWiinpayStatus(rawStatus);
 
     // Criar cliente Supabase
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -161,7 +160,6 @@ serve(async (req) => {
     // Prevenir downgrade de status
     const statusPriority: Record<string, number> = {
       'pending': 1,
-      'approved': 2,
       'paid': 3,
       'rejected': 0,
       'cancelled': 0,
@@ -214,9 +212,10 @@ serve(async (req) => {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
+    // Wiinpay espera resposta "ACCEPTED"
     return new Response(
-      JSON.stringify({ success: true }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      'ACCEPTED',
+      { headers: { ...corsHeaders, 'Content-Type': 'text/plain' } }
     );
 
   } catch (error) {
