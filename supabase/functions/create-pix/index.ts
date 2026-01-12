@@ -103,7 +103,8 @@ serve(async (req) => {
 
     console.log(`Criando PIX Wiinpay para plano: ${plan_name}, valor: R$ ${amountInReais.toFixed(2)}`);
 
-    const response = await fetch('https://api.wiinpay.com.br/api/v1/transaction/pix/cashin', {
+    // Endpoint Wiinpay para gerar PIX
+    const response = await fetch('https://api.wiinpay.com.br/pix/charge', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -113,10 +114,6 @@ serve(async (req) => {
       body: JSON.stringify({
         amount: amountInReais,
         description: plan_name,
-        name: "Cliente",
-        email: "cliente@email.com",
-        phone: "00000000000",
-        document: "00000000000",
         callbackUrl: webhookUrl,
       }),
     });
