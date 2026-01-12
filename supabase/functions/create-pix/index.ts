@@ -78,17 +78,17 @@ serve(async (req) => {
   try {
     const { value, plan_name } = await req.json();
 
-    if (!value || value < 50) {
+    if (!value || value < 100) {
       return new Response(
-        JSON.stringify({ error: 'Valor mínimo é 50 centavos' }),
+        JSON.stringify({ error: 'Valor mínimo é R$ 1,00' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const apiKey = Deno.env.get('WIINPAY_API_KEY');
+    const apiKey = Deno.env.get('PUSHINPAY_API_KEY');
     
     if (!apiKey) {
-      console.error('WIINPAY_API_KEY não configurada');
+      console.error('PUSHINPAY_API_KEY não configurada');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -96,15 +96,12 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/wiinpay-webhook`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/pushinpay-webhook`;
 
-    // Converter centavos para reais
-    const amountInReais = value / 100;
+    console.log(`Criando PIX PushinPay para plano: ${plan_name}, valor: ${value} centavos`);
 
-    console.log(`Criando PIX Wiinpay para plano: ${plan_name}, valor: R$ ${amountInReais.toFixed(2)}`);
-
-    // Endpoint Wiinpay para gerar PIX
-    const response = await fetch('https://api.wiinpay.com.br/pix/charge', {
+    // PushinPay usa valor em centavos
+    const response = await fetch('https://api.pushinpay.com.br/api/pix/cashIn', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -112,27 +109,24 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: amountInReais,
-        description: plan_name,
-        callbackUrl: webhookUrl,
+        value: value,
+        webhook_url: webhookUrl,
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Erro na API Wiinpay:', data);
+      console.error('Erro na API PushinPay:', data);
       return new Response(
         JSON.stringify({ error: data.message || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Wiinpay retorna { transaction: [{ id, qr_code, qr_code_image, status, ... }] }
-    const transaction = data.transaction?.[0] || data;
-    const transactionId = transaction.id || transaction.identifier;
-    const qrCode = transaction.qr_code || transaction.pix_code;
-    const qrCodeImage = transaction.qr_code_image;
+    const transactionId = data.id;
+    const qrCode = data.qr_code;
+    const qrCodeBase64 = data.qr_code_base64;
 
     console.log('PIX criado com sucesso:', transactionId);
 
@@ -157,9 +151,9 @@ serve(async (req) => {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
-    // Se não tiver imagem base64, gerar QR code via API externa
-    let qrCodeUrl = qrCodeImage;
-    if (!qrCodeUrl || !qrCodeUrl.startsWith('data:')) {
+    // Gerar QR code URL se não vier base64
+    let qrCodeUrl = qrCodeBase64;
+    if (!qrCodeUrl) {
       qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCode)}`;
     }
 
