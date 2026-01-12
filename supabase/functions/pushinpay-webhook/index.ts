@@ -6,13 +6,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Mapear status do Wiinpay para nosso formato
-const mapWiinpayStatus = (status: string): string => {
+// Mapear status do PushinPay para nosso formato
+const mapPushinPayStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
     'pending': 'pending',
-    'waiting_payment': 'pending',
-    'paid': 'paid',
     'approved': 'paid',
+    'paid': 'paid',
     'completed': 'paid',
     'rejected': 'rejected',
     'cancelled': 'cancelled',
@@ -119,13 +118,11 @@ serve(async (req) => {
   try {
     const payload = await req.json();
     
-    console.log('Webhook Wiinpay recebido:', JSON.stringify(payload));
+    console.log('Webhook PushinPay recebido:', JSON.stringify(payload));
 
-    // Wiinpay pode enviar em formatos diferentes
-    const webhookData = payload.transaction?.[0] || payload.data || payload;
-    
-    const transactionId = webhookData.id || webhookData.identifier || webhookData.uuid;
-    const rawStatus = webhookData.status;
+    // PushinPay envia { id, status, ... }
+    const transactionId = payload.id || payload.transaction_id;
+    const rawStatus = payload.status;
 
     if (!transactionId || !rawStatus) {
       console.error('Payload inválido - faltando id ou status');
@@ -135,7 +132,7 @@ serve(async (req) => {
       );
     }
 
-    const status = mapWiinpayStatus(rawStatus);
+    const status = mapPushinPayStatus(rawStatus);
 
     // Criar cliente Supabase
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -212,10 +209,9 @@ serve(async (req) => {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
-    // Wiinpay espera resposta "ACCEPTED"
     return new Response(
-      'ACCEPTED',
-      { headers: { ...corsHeaders, 'Content-Type': 'text/plain' } }
+      JSON.stringify({ success: true }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
