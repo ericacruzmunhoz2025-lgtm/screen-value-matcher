@@ -45,6 +45,70 @@ async function getAuthToken(clientId: string, clientSecret: string): Promise<str
   return data.access_token;
 }
 
+// Enviar pedido pendente para UTMify
+async function sendPendingOrderToUtmify(
+  apiKey: string,
+  transactionId: string,
+  value: number,
+  planName: string
+) {
+  try {
+    const payload = {
+      orderId: transactionId,
+      platform: "custom",
+      paymentMethod: "pix",
+      status: "waiting_payment",
+      createdAt: new Date().toISOString(),
+      approvedDate: null,
+      refundedAt: null,
+      customer: {
+        name: null,
+        email: null,
+        phone: null,
+        document: null,
+        country: "BR",
+      },
+      products: [
+        {
+          id: planName.replace(/\s+/g, '-').toLowerCase(),
+          name: planName,
+          planId: null,
+          planName: null,
+          quantity: 1,
+          priceInCents: value,
+        },
+      ],
+      commission: {
+        totalPriceInCents: value,
+        gatewayFeeInCents: 0,
+        userCommissionInCents: value,
+      },
+      isTest: false,
+    };
+
+    console.log('Enviando pedido pendente para UTMify:', JSON.stringify(payload));
+
+    const response = await fetch('https://api.utmify.com.br/api/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-token': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Erro ao enviar para UTMify:', response.status, errorText);
+    } else {
+      const result = await response.json();
+      console.log('UTMify pedido pendente criado:', JSON.stringify(result));
+    }
+  } catch (error) {
+    console.error('Erro ao enviar para UTMify:', error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -120,6 +184,14 @@ serve(async (req) => {
         value: value,
         status: 'pending',
       });
+
+    // Enviar pedido pendente para UTMify
+    const utmifyApiKey = Deno.env.get('UTMIFY_API_KEY');
+    if (utmifyApiKey) {
+      await sendPendingOrderToUtmify(utmifyApiKey, data.identifier, value, plan_name);
+    } else {
+      console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
+    }
 
     // Gerar QR code base64 a partir do pix_code
     const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.pix_code)}`;

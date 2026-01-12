@@ -22,6 +22,88 @@ const mapSyncPayStatus = (status: string): string => {
   return statusMap[status.toUpperCase()] || status.toLowerCase();
 };
 
+// Mapear status para UTMify
+const mapStatusToUtmify = (status: string): string | null => {
+  const utmifyStatusMap: Record<string, string> = {
+    'pending': 'waiting_payment',
+    'approved': 'approved',
+    'paid': 'approved',
+  };
+  return utmifyStatusMap[status] || null;
+};
+
+// Enviar evento para UTMify
+async function sendToUtmify(
+  apiKey: string,
+  transactionId: string,
+  status: string,
+  value: number,
+  planName: string
+) {
+  const utmifyStatus = mapStatusToUtmify(status);
+  
+  if (!utmifyStatus) {
+    console.log('Status não mapeado para UTMify:', status);
+    return;
+  }
+
+  try {
+    const payload = {
+      orderId: transactionId,
+      platform: "custom",
+      paymentMethod: "pix",
+      status: utmifyStatus,
+      createdAt: new Date().toISOString(),
+      approvedDate: utmifyStatus === 'approved' ? new Date().toISOString() : null,
+      refundedAt: null,
+      customer: {
+        name: null,
+        email: null,
+        phone: null,
+        document: null,
+        country: "BR",
+      },
+      products: [
+        {
+          id: planName.replace(/\s+/g, '-').toLowerCase(),
+          name: planName,
+          planId: null,
+          planName: null,
+          quantity: 1,
+          priceInCents: value,
+        },
+      ],
+      commission: {
+        totalPriceInCents: value,
+        gatewayFeeInCents: 0,
+        userCommissionInCents: value,
+      },
+      isTest: false,
+    };
+
+    console.log('Enviando para UTMify:', JSON.stringify(payload));
+
+    const response = await fetch('https://api.utmify.com.br/api/v1/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-token': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Erro ao enviar para UTMify:', response.status, errorText);
+    } else {
+      const result = await response.json();
+      console.log('UTMify resposta:', JSON.stringify(result));
+    }
+  } catch (error) {
+    console.error('Erro ao enviar para UTMify:', error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -60,10 +142,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verificar se a transação existe
+    // Verificar se a transação existe e buscar dados completos
     const { data: existingPayment, error: fetchError } = await supabase
       .from('pix_payments')
-      .select('id, status')
+      .select('id, status, value, plan_name')
       .eq('transaction_id', transactionId)
       .single();
 
@@ -116,6 +198,20 @@ serve(async (req) => {
     }
 
     console.log('Status do pagamento atualizado:', transactionId, status);
+
+    // Enviar para UTMify se configurado
+    const utmifyApiKey = Deno.env.get('UTMIFY_API_KEY');
+    if (utmifyApiKey) {
+      await sendToUtmify(
+        utmifyApiKey,
+        transactionId,
+        status,
+        existingPayment.value,
+        existingPayment.plan_name
+      );
+    } else {
+      console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
+    }
 
     return new Response(
       JSON.stringify({ success: true }),
