@@ -1,0 +1,132 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Mapear status do SyncPay para nosso formato
+const mapSyncPayStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    'PENDING': 'pending',
+    'APPROVED': 'approved',
+    'PAID': 'paid',
+    'COMPLETED': 'paid',
+    'REJECTED': 'rejected',
+    'CANCELLED': 'cancelled',
+    'CANCELED': 'cancelled',
+    'EXPIRED': 'expired',
+    'REFUNDED': 'refunded',
+  };
+  return statusMap[status.toUpperCase()] || status.toLowerCase();
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  try {
+    const payload = await req.json();
+    
+    console.log('Webhook SyncPay recebido:', JSON.stringify(payload));
+
+    // SyncPay envia dados no formato { data: { id, status, ... } }
+    const webhookData = payload.data || payload;
+    
+    const transactionId = webhookData.id || webhookData.identifier;
+    const rawStatus = webhookData.status;
+
+    if (!transactionId || !rawStatus) {
+      console.error('Payload inválido - faltando id ou status');
+      return new Response(
+        JSON.stringify({ error: 'Invalid payload structure' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const status = mapSyncPayStatus(rawStatus);
+
+    // Criar cliente Supabase
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Verificar se a transação existe
+    const { data: existingPayment, error: fetchError } = await supabase
+      .from('pix_payments')
+      .select('id, status')
+      .eq('transaction_id', transactionId)
+      .single();
+
+    if (fetchError || !existingPayment) {
+      console.error('Transação não encontrada:', transactionId);
+      return new Response(
+        JSON.stringify({ error: 'Transaction not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Prevenir downgrade de status
+    const statusPriority: Record<string, number> = {
+      'pending': 1,
+      'approved': 2,
+      'paid': 3,
+      'rejected': 0,
+      'cancelled': 0,
+      'expired': 0,
+      'refunded': 4
+    };
+
+    const currentPriority = statusPriority[existingPayment.status] || 0;
+    const newPriority = statusPriority[status] || 0;
+
+    if (newPriority < currentPriority && !['rejected', 'cancelled', 'expired', 'refunded'].includes(status)) {
+      console.log('Ignorando downgrade de status:', existingPayment.status, '->', status);
+      return new Response(
+        JSON.stringify({ success: true, message: 'Status unchanged' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Atualizar status do pagamento
+    const { error } = await supabase
+      .from('pix_payments')
+      .update({
+        status: status,
+        payload: payload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('transaction_id', transactionId);
+
+    if (error) {
+      console.error('Erro ao salvar status:', error);
+      return new Response(
+        JSON.stringify({ error: 'Failed to update payment' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Status do pagamento atualizado:', transactionId, status);
+
+    return new Response(
+      JSON.stringify({ success: true }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Erro no webhook:', error);
+    return new Response(
+      JSON.stringify({ error: 'Internal error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});

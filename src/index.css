@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 33% 97%;
+    --foreground: 20 10% 20%;
+
+    --card: 30 30% 98%;
+    --card-foreground: 20 10% 20%;
+
+    --popover: 30 30% 98%;
+    --popover-foreground: 20 10% 20%;
+
+    --primary: 25 95% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 30 20% 94%;
+    --secondary-foreground: 20 10% 20%;
+
+    --muted: 30 15% 92%;
+    --muted-foreground: 20 8% 45%;
+
+    --accent: 25 100% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 30 20% 90%;
+    --input: 30 20% 90%;
+    --ring: 25 95% 60%;
+
+    --radius: 1rem;
+
+    /* Custom gradients */
+    --gradient-subscription: linear-gradient(135deg, hsl(30 90% 70%) 0%, hsl(15 85% 65%) 100%);
+    --gradient-promo: linear-gradient(135deg, hsl(25 90% 75%) 0%, hsl(10 80% 70%) 100%);
+  }
+
+  .dark {
+    --background: 20 10% 10%;
+    --foreground: 30 20% 95%;
+
+    --card: 20 10% 12%;
+    --card-foreground: 30 20% 95%;
+
+    --popover: 20 10% 12%;
+    --popover-foreground: 30 20% 95%;
+
+    --primary: 25 95% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 20 10% 18%;
+    --secondary-foreground: 30 20% 95%;
+
+    --muted: 20 10% 18%;
+    --muted-foreground: 30 15% 60%;
+
+    --accent: 25 100% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 20 10% 20%;
+    --input: 20 10% 20%;
+    --ring: 25 95% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+@layer components {
+  .subscription-button {
+    @apply w-full flex items-center justify-between px-4 py-3 rounded-full text-foreground font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] text-sm;
+    background: var(--gradient-subscription);
+  }
+
+  .promo-button {
+    @apply w-full flex items-center justify-between px-4 py-3 rounded-full text-foreground font-medium transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] text-sm;
+    background: var(--gradient-promo);
+  }
+
+  .content-card {
+    @apply bg-card rounded-2xl shadow-sm border border-border overflow-hidden;
+  }
+
+  .tab-active {
+    @apply text-accent border-b-2 border-accent;
+  }
+
+  .locked-content {
+    @apply bg-muted/50 backdrop-blur-sm;
+  }
+}
