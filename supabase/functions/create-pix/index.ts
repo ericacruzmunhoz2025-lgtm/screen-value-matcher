@@ -6,45 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Cache do token de autenticação
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
-async function getAuthToken(clientId: string, clientSecret: string): Promise<string> {
-  // Verificar se o token em cache ainda é válido (com margem de 5 minutos)
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 300000) {
-    return cachedToken.token;
-  }
-
-  console.log('Gerando novo token SyncPay...');
-  
-  const response = await fetch('https://api.syncpayments.com.br/api/partner/v1/auth-token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.text();
-    console.error('Erro ao gerar token SyncPay:', errorData);
-    throw new Error('Falha ao autenticar com SyncPay');
-  }
-
-  const data = await response.json();
-  
-  // Cachear o token (expires_in é em segundos)
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in * 1000),
-  };
-
-  return data.access_token;
-}
-
 // Enviar pedido pendente para UTMify
 async function sendPendingOrderToUtmify(
   apiKey: string,
@@ -124,53 +85,59 @@ serve(async (req) => {
       );
     }
 
-    const clientId = Deno.env.get('SYNCPAY_CLIENT_ID');
-    const clientSecret = Deno.env.get('SYNCPAY_CLIENT_SECRET');
+    const apiKey = Deno.env.get('WIINPAY_API_KEY');
     
-    if (!clientId || !clientSecret) {
-      console.error('Credenciais SyncPay não configuradas');
+    if (!apiKey) {
+      console.error('WIINPAY_API_KEY não configurada');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Obter token de autenticação
-    const authToken = await getAuthToken(clientId, clientSecret);
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/wiinpay-webhook`;
 
-    // Converter centavos para reais (SyncPay usa valor em reais)
+    // Converter centavos para reais
     const amountInReais = value / 100;
 
-    console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: R$ ${amountInReais.toFixed(2)}, webhook: ${webhookUrl}`);
+    console.log(`Criando PIX Wiinpay para plano: ${plan_name}, valor: R$ ${amountInReais.toFixed(2)}`);
 
-    const response = await fetch('https://api.syncpayments.com.br/api/partner/v1/cash-in', {
+    const response = await fetch('https://api.wiinpay.com.br/api/v1/transaction/pix/cashin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${authToken}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         amount: amountInReais,
         description: plan_name,
-        webhook_url: webhookUrl,
+        name: "Cliente",
+        email: "cliente@email.com",
+        phone: "00000000000",
+        document: "00000000000",
+        callbackUrl: webhookUrl,
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Erro na API SyncPay:', data);
+      console.error('Erro na API Wiinpay:', data);
       return new Response(
         JSON.stringify({ error: data.message || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('PIX criado com sucesso:', data.identifier);
+    // Wiinpay retorna { transaction: [{ id, qr_code, qr_code_image, status, ... }] }
+    const transaction = data.transaction?.[0] || data;
+    const transactionId = transaction.id || transaction.identifier;
+    const qrCode = transaction.qr_code || transaction.pix_code;
+    const qrCodeImage = transaction.qr_code_image;
+
+    console.log('PIX criado com sucesso:', transactionId);
 
     // Salvar transação no banco
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -179,7 +146,7 @@ serve(async (req) => {
     await supabase
       .from('pix_payments')
       .insert({
-        transaction_id: data.identifier,
+        transaction_id: transactionId,
         plan_name: plan_name,
         value: value,
         status: 'pending',
@@ -188,18 +155,21 @@ serve(async (req) => {
     // Enviar pedido pendente para UTMify
     const utmifyApiKey = Deno.env.get('UTMIFY_API_KEY');
     if (utmifyApiKey) {
-      await sendPendingOrderToUtmify(utmifyApiKey, data.identifier, value, plan_name);
+      await sendPendingOrderToUtmify(utmifyApiKey, transactionId, value, plan_name);
     } else {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
-    // Gerar QR code base64 a partir do pix_code
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(data.pix_code)}`;
+    // Se não tiver imagem base64, gerar QR code via API externa
+    let qrCodeUrl = qrCodeImage;
+    if (!qrCodeUrl || !qrCodeUrl.startsWith('data:')) {
+      qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCode)}`;
+    }
 
     return new Response(
       JSON.stringify({
-        id: data.identifier,
-        qr_code: data.pix_code,
+        id: transactionId,
+        qr_code: qrCode,
         qr_code_base64: qrCodeUrl,
         status: 'pending',
         value: value,
