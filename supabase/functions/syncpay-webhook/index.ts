@@ -10,6 +10,7 @@ const corsHeaders = {
 const mapSyncPayStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
     'PENDING': 'pending',
+    'WAITING_FOR_APPROVAL': 'pending',
     'APPROVED': 'approved',
     'PAID': 'paid',
     'COMPLETED': 'paid',
