@@ -53,7 +53,7 @@ async function sendPendingOrderToUtmify(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-token': apiKey,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
     });
