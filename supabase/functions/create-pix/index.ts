@@ -6,6 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface TrackingParams {
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  src?: string | null;
+  sck?: string | null;
+}
+
 // Obter token de autenticação SyncPay
 async function getSyncPayToken(clientId: string, clientSecret: string): Promise<string | null> {
   try {
@@ -39,7 +49,8 @@ async function sendPendingOrderToUtmify(
   apiKey: string,
   transactionId: string,
   value: number,
-  planName: string
+  planName: string,
+  trackingParams: TrackingParams
 ) {
   try {
     const payload = {
@@ -73,13 +84,13 @@ async function sendPendingOrderToUtmify(
         userCommissionInCents: value,
       },
       trackingParameters: {
-        src: null,
-        sck: null,
-        utm_source: null,
-        utm_campaign: null,
-        utm_medium: null,
-        utm_content: null,
-        utm_term: null,
+        src: trackingParams.src || null,
+        sck: trackingParams.sck || null,
+        utm_source: trackingParams.utm_source || null,
+        utm_campaign: trackingParams.utm_campaign || null,
+        utm_medium: trackingParams.utm_medium || null,
+        utm_content: trackingParams.utm_content || null,
+        utm_term: trackingParams.utm_term || null,
       },
       isTest: false,
     };
@@ -113,7 +124,7 @@ serve(async (req) => {
   }
 
   try {
-    const { value, plan_name } = await req.json();
+    const { value, plan_name, tracking_params } = await req.json();
 
     if (!value || value < 100) {
       return new Response(
@@ -134,6 +145,7 @@ serve(async (req) => {
     }
 
     console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: ${value} centavos`);
+    console.log('Tracking params recebidos:', JSON.stringify(tracking_params || {}));
 
     // Obter token de autenticação
     const token = await getSyncPayToken(clientId, clientSecret);
@@ -203,7 +215,7 @@ serve(async (req) => {
 
     console.log('PIX criado com sucesso:', transactionId);
 
-    // Salvar transação no banco
+    // Salvar transação no banco com tracking params
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -214,12 +226,13 @@ serve(async (req) => {
         plan_name: plan_name,
         value: value,
         status: 'pending',
+        payload: { tracking_params: tracking_params || {} },
       });
 
     // Enviar pedido pendente para UTMify
     const utmifyApiKey = Deno.env.get('UTMIFY_API_KEY');
     if (utmifyApiKey) {
-      await sendPendingOrderToUtmify(utmifyApiKey, transactionId, value, plan_name);
+      await sendPendingOrderToUtmify(utmifyApiKey, transactionId, value, plan_name, tracking_params || {});
     } else {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }

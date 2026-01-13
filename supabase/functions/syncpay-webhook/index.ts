@@ -6,6 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface TrackingParams {
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  src?: string | null;
+  sck?: string | null;
+}
+
 // Mapear status do SyncPay para nosso formato
 const mapSyncPayStatus = (status: string): string => {
   const statusMap: Record<string, string> = {
@@ -14,13 +24,15 @@ const mapSyncPayStatus = (status: string): string => {
     'paid': 'paid',
     'completed': 'paid',
     'confirmed': 'paid',
+    'WAITING_FOR_APPROVAL': 'pending',
+    'PAID': 'paid',
     'rejected': 'rejected',
     'cancelled': 'cancelled',
     'canceled': 'cancelled',
     'expired': 'expired',
     'refunded': 'refunded',
   };
-  return statusMap[status.toLowerCase()] || status.toLowerCase();
+  return statusMap[status] || statusMap[status.toLowerCase()] || status.toLowerCase();
 };
 
 // Mapear status para UTMify
@@ -38,7 +50,8 @@ async function sendToUtmify(
   transactionId: string,
   status: string,
   value: number,
-  planName: string
+  planName: string,
+  trackingParams: TrackingParams
 ) {
   const utmifyStatus = mapStatusToUtmify(status);
   
@@ -79,13 +92,13 @@ async function sendToUtmify(
         userCommissionInCents: value,
       },
       trackingParameters: {
-        src: null,
-        sck: null,
-        utm_source: null,
-        utm_campaign: null,
-        utm_medium: null,
-        utm_content: null,
-        utm_term: null,
+        src: trackingParams.src || null,
+        sck: trackingParams.sck || null,
+        utm_source: trackingParams.utm_source || null,
+        utm_campaign: trackingParams.utm_campaign || null,
+        utm_medium: trackingParams.utm_medium || null,
+        utm_content: trackingParams.utm_content || null,
+        utm_term: trackingParams.utm_term || null,
       },
       isTest: false,
     };
@@ -131,8 +144,8 @@ serve(async (req) => {
     console.log('Webhook SyncPay recebido:', JSON.stringify(payload));
 
     // SyncPay pode enviar em diferentes formatos
-    const transactionId = payload.transaction_id || payload.id || payload.txid;
-    const rawStatus = payload.status || payload.payment_status;
+    const transactionId = payload.transaction_id || payload.id || payload.txid || payload.idTransaction;
+    const rawStatus = payload.status || payload.payment_status || payload.status_transaction;
 
     if (!transactionId || !rawStatus) {
       console.error('Payload inválido - faltando transaction_id ou status');
@@ -149,10 +162,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verificar se a transação existe e buscar dados completos
+    // Verificar se a transação existe e buscar dados completos incluindo payload com UTMs
     const { data: existingPayment, error: fetchError } = await supabase
       .from('pix_payments')
-      .select('id, status, value, plan_name')
+      .select('id, status, value, plan_name, payload')
       .eq('transaction_id', transactionId)
       .single();
 
@@ -163,6 +176,12 @@ serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Extrair tracking params do payload salvo
+    const savedPayload = existingPayment.payload as { tracking_params?: TrackingParams } | null;
+    const trackingParams: TrackingParams = savedPayload?.tracking_params || {};
+    
+    console.log('Tracking params do pedido:', JSON.stringify(trackingParams));
 
     // Prevenir downgrade de status
     const statusPriority: Record<string, number> = {
@@ -185,12 +204,12 @@ serve(async (req) => {
       );
     }
 
-    // Atualizar status do pagamento
+    // Atualizar status do pagamento (mantendo tracking_params no payload)
     const { error } = await supabase
       .from('pix_payments')
       .update({
         status: status,
-        payload: payload,
+        payload: { ...savedPayload, webhook_response: payload },
         updated_at: new Date().toISOString(),
       })
       .eq('transaction_id', transactionId);
@@ -213,7 +232,8 @@ serve(async (req) => {
         transactionId,
         status,
         existingPayment.value,
-        existingPayment.plan_name
+        existingPayment.plan_name,
+        trackingParams
       );
     } else {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');

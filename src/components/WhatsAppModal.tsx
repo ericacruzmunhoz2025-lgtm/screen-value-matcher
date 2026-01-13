@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { trackPurchase, trackInitiateCheckout } from "@/lib/meta-pixel";
 import { trackUtmifyPurchase } from "@/lib/utmify-pixel";
+import { getStoredUTMParams } from "@/lib/utm-capture";
 
 interface WhatsAppModalProps {
   isOpen: boolean;
@@ -28,10 +29,12 @@ const WhatsAppModal = ({ isOpen, onClose, onPaymentSuccess }: WhatsAppModalProps
     trackInitiateCheckout(1490, 'BRL', 'Acesso Privado');
 
     try {
+      const utmParams = getStoredUTMParams();
       const { data, error } = await supabase.functions.invoke('create-pix', {
         body: {
-          value: 1490, // R$ 14,90 em centavos
+          value: 1490,
           plan_name: 'Acesso Privado',
+          tracking_params: utmParams,
         },
       });
 
