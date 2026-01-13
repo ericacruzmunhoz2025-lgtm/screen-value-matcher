@@ -205,17 +205,11 @@ serve(async (req) => {
     const amountInReais = value / 100;
 
     // Criar PIX via endpoint CashIn conforme documentação
-    // client é obrigatório conforme docs
+    // Testar payload mínimo
     const cashInPayload = {
       amount: amountInReais,
       description: plan_name || 'Pagamento PIX',
       webhook_url: webhookUrl,
-      client: {
-        name: 'Cliente',
-        cpf: '00000000000',
-        email: 'cliente@email.com',
-        phone: '11999999999',
-      },
     };
 
     console.log('Enviando para SyncPay CashIn:', JSON.stringify(cashInPayload));
