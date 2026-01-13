@@ -23,8 +23,8 @@ async function sendPendingOrderToUtmify(
       approvedDate: null,
       refundedAt: null,
       customer: {
-        name: null,
-        email: null,
+        name: "Cliente PIX",
+        email: "cliente@pix.com",
         phone: null,
         document: null,
         country: "BR",
@@ -44,16 +44,25 @@ async function sendPendingOrderToUtmify(
         gatewayFeeInCents: 0,
         userCommissionInCents: value,
       },
+      trackingParameters: {
+        src: null,
+        sck: null,
+        utm_source: null,
+        utm_campaign: null,
+        utm_medium: null,
+        utm_content: null,
+        utm_term: null,
+      },
       isTest: false,
     };
 
     console.log('Enviando pedido pendente para UTMify:', JSON.stringify(payload));
 
-    const response = await fetch('https://api.utmify.com.br/api/v1/orders', {
+    const response = await fetch('https://api.utmify.com.br/api-credentials/orders', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-token': apiKey,
       },
       body: JSON.stringify(payload),
     });
