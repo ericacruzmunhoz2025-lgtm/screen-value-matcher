@@ -202,10 +202,9 @@ serve(async (req) => {
     const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
 
     // Valor em reais (SyncPay espera formato decimal, ex: 14.67)
-    const amountInReais = value / 100;
+    const amountInReais = parseFloat((value / 100).toFixed(2));
 
     // Criar PIX via endpoint CashIn conforme documentação
-    // Testar payload mínimo
     const cashInPayload = {
       amount: amountInReais,
       description: plan_name || 'Pagamento PIX',
@@ -213,6 +212,7 @@ serve(async (req) => {
     };
 
     console.log('Enviando para SyncPay CashIn:', JSON.stringify(cashInPayload));
+    console.log('Headers:', JSON.stringify({ Authorization: `Bearer ${token.substring(0, 20)}...` }));
 
     const response = await fetch(`${SYNCPAY_API_BASE}/api/partner/v1/cash-in`, {
       method: 'POST',
