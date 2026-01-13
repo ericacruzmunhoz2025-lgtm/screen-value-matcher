@@ -94,10 +94,11 @@ serve(async (req) => {
       );
     }
 
-    const apiKey = Deno.env.get('PUSHINPAY_API_KEY');
+    const clientId = Deno.env.get('SYNCPAY_CLIENT_ID');
+    const clientSecret = Deno.env.get('SYNCPAY_CLIENT_SECRET');
     
-    if (!apiKey) {
-      console.error('PUSHINPAY_API_KEY não configurada');
+    if (!clientId || !clientSecret) {
+      console.error('SyncPay credentials não configuradas');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -105,37 +106,41 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/pushinpay-webhook`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
 
-    console.log(`Criando PIX PushinPay para plano: ${plan_name}, valor: ${value} centavos`);
+    console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: ${value} centavos`);
 
-    // PushinPay usa valor em centavos
-    const response = await fetch('https://api.pushinpay.com.br/api/pix/cashIn', {
+    // SyncPay usa valor em reais (float)
+    const valueInReais = value / 100;
+
+    const response = await fetch('https://api.syncpayments.com.br/v1/pix/qrcode', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'application/json',
         'Content-Type': 'application/json',
+        'client_id': clientId,
+        'client_secret': clientSecret,
       },
       body: JSON.stringify({
-        value: value,
+        amount: valueInReais,
+        description: plan_name,
         webhook_url: webhookUrl,
+        external_reference: `${plan_name}-${Date.now()}`,
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Erro na API PushinPay:', data);
+      console.error('Erro na API SyncPay:', data);
       return new Response(
         JSON.stringify({ error: data.message || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const transactionId = data.id;
-    const qrCode = data.qr_code;
-    const qrCodeBase64 = data.qr_code_base64;
+    const transactionId = data.transaction_id || data.id || data.txid;
+    const qrCode = data.qr_code || data.pix_copia_cola || data.emv;
+    const qrCodeBase64 = data.qr_code_base64 || data.qr_code_image;
 
     console.log('PIX criado com sucesso:', transactionId);
 
@@ -162,7 +167,7 @@ serve(async (req) => {
 
     // Gerar QR code URL se não vier base64
     let qrCodeUrl = qrCodeBase64;
-    if (!qrCodeUrl) {
+    if (!qrCodeUrl && qrCode) {
       qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCode)}`;
     }
 
