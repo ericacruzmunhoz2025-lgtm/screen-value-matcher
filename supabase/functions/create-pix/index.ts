@@ -47,6 +47,40 @@ interface TrackingParams {
   sck?: string | null;
 }
 
+// Base URL da API SyncPay v2
+const SYNCPAY_API_BASE = 'https://api.syncpay.com.br';
+
+// Obter token de autenticação do SyncPay
+async function getSyncPayToken(clientId: string, clientSecret: string): Promise<string | null> {
+  try {
+    console.log('Obtendo token SyncPay...');
+    
+    const response = await fetch(`${SYNCPAY_API_BASE}/api/partner/v1/auth-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error('Erro ao obter token SyncPay:', data);
+      return null;
+    }
+
+    console.log('Token SyncPay obtido com sucesso');
+    return data.token || data.access_token || data.bearer_token;
+  } catch (error) {
+    console.error('Erro na autenticação SyncPay:', error);
+    return null;
+  }
+}
+
 // Enviar pedido pendente para UTMify
 async function sendPendingOrderToUtmify(
   apiKey: string,
@@ -138,10 +172,10 @@ serve(async (req) => {
       );
     }
 
-    const publicKey = Deno.env.get('SYNCPAY_PUBLIC_KEY');
-    const secretKey = Deno.env.get('SYNCPAY_SECRET_KEY');
+    const clientId = Deno.env.get('SYNCPAY_PUBLIC_KEY');
+    const clientSecret = Deno.env.get('SYNCPAY_SECRET_KEY');
     
-    if (!publicKey || !secretKey) {
+    if (!clientId || !clientSecret) {
       console.error('SYNCPAY keys não configuradas');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
@@ -152,40 +186,38 @@ serve(async (req) => {
     console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: ${value} centavos`);
     console.log('Tracking params recebidos:', JSON.stringify(tracking_params || {}));
 
+    // Obter token de autenticação
+    const token = await getSyncPayToken(clientId, clientSecret);
+    
+    if (!token) {
+      console.error('Falha ao obter token SyncPay');
+      return new Response(
+        JSON.stringify({ error: 'Erro de autenticação com gateway de pagamento' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
 
-    // Valor em reais (SyncPay espera valor com decimais)
-    const valueInReais = (value / 100).toFixed(2);
-
-    // SyncPay API - endpoint correto: /v1/gateway/api
-    const response = await fetch('https://api.syncpay.net.br/v1/gateway/api', {
+    // Valor em centavos (SyncPay CashIn espera valor inteiro em centavos)
+    const response = await fetch(`${SYNCPAY_API_BASE}/api/partner/v1/cash-in`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${secretKey}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
-        pix: {
-          value: valueInReais,
-          description: plan_name || 'Pagamento PIX',
-        },
-        items: [
-          {
-            name: plan_name || 'Assinatura',
-            quantity: 1,
-            value: valueInReais,
-          }
-        ],
-        urlWebHook: webhookUrl,
-        client_id: publicKey,
+        amount: value,
+        description: plan_name || 'Pagamento PIX',
+        webhook_url: webhookUrl,
       }),
     });
 
     const data = await response.json();
 
     if (!response.ok || data.status === 'error') {
-      console.error('Erro na API SyncPay:', data);
+      console.error('Erro na API SyncPay CashIn:', data);
       return new Response(
         JSON.stringify({ error: data.message || data.error || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -194,10 +226,10 @@ serve(async (req) => {
 
     console.log('Resposta SyncPay:', JSON.stringify(data));
 
-    // SyncPay retorna: idTransaction, paymentCode (EMV PIX), paymentCodeBase64
-    const transactionId = data.idTransaction || data.id || data.transaction_id;
-    const qrCode = data.paymentCode || data.qr_code || data.pix_code;
-    const qrCodeBase64Raw = data.paymentCodeBase64 || data.qr_code_base64;
+    // SyncPay pode retornar em diferentes formatos
+    const transactionId = data.idTransaction || data.id || data.transaction_id || data.txid;
+    const qrCode = data.paymentCode || data.qr_code || data.pix_code || data.emv;
+    const qrCodeBase64Raw = data.paymentCodeBase64 || data.qr_code_base64 || data.qr_code_image;
 
     if (!transactionId) {
       console.error('SyncPay não retornou transaction ID:', data);
@@ -231,19 +263,17 @@ serve(async (req) => {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
-    // Gerar QR code URL - decodificar base64 se necessário
+    // Gerar QR code URL
     let qrCodeUrl = '';
     if (qrCodeBase64Raw) {
-      // Se já é uma URL de dados ou imagem
       if (qrCodeBase64Raw.startsWith('data:') || qrCodeBase64Raw.startsWith('http')) {
         qrCodeUrl = qrCodeBase64Raw;
       } else {
-        // Decodificar base64 do EMV e gerar QR via API externa
+        // Tentar decodificar base64 do EMV
         try {
           const decodedEMV = atob(qrCodeBase64Raw);
           qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(decodedEMV)}`;
         } catch {
-          // Se falhar decodificar, usar o paymentCode diretamente
           qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCode || '')}`;
         }
       }
