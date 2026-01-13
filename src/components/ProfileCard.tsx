@@ -11,6 +11,7 @@ import DataProtectionUpsellModal from "./DataProtectionUpsellModal";
 import ContentReleaseUpsellModal from "./ContentReleaseUpsellModal";
 import { trackPurchase, trackInitiateCheckout } from "@/lib/meta-pixel";
 import { trackUtmifyPurchase } from "@/lib/utmify-pixel";
+import { getStoredUTMParams } from "@/lib/utm-capture";
 
 const WhatsAppIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true" {...props}>
@@ -67,10 +68,12 @@ const ProfileCard = () => {
     trackInitiateCheckout(plan.valueCents, 'BRL', plan.name);
 
     try {
+      const utmParams = getStoredUTMParams();
       const { data, error } = await supabase.functions.invoke('create-pix', {
         body: {
           value: plan.valueCents,
           plan_name: plan.name,
+          tracking_params: utmParams,
         },
       });
 

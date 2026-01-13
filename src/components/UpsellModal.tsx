@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { trackPurchase, trackInitiateCheckout } from "@/lib/meta-pixel";
 import { trackUtmifyPurchase } from "@/lib/utmify-pixel";
+import { getStoredUTMParams } from "@/lib/utm-capture";
 
 interface UpsellModalProps {
   isOpen: boolean;
@@ -28,10 +29,12 @@ const UpsellModal = ({ isOpen, onClose, onPaymentSuccess }: UpsellModalProps) =>
     trackInitiateCheckout(1100, 'BRL', 'Proteja seus dados');
 
     try {
+      const utmParams = getStoredUTMParams();
       const { data, error } = await supabase.functions.invoke('create-pix', {
         body: {
-          value: 1100, // R$ 11,00 em centavos
+          value: 1100,
           plan_name: 'Proteja seus dados',
+          tracking_params: utmParams,
         },
       });
 

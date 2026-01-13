@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { trackPurchase, trackInitiateCheckout } from "@/lib/meta-pixel";
 import { trackUtmifyPurchase } from "@/lib/utmify-pixel";
+import { getStoredUTMParams } from "@/lib/utm-capture";
 
 interface ContentReleaseUpsellModalProps {
   isOpen: boolean;
@@ -29,10 +30,12 @@ const ContentReleaseUpsellModal = ({ isOpen, onClose, onPaymentSuccess, onDeclin
     trackInitiateCheckout(890, 'BRL', 'Liberação de Conteúdos');
 
     try {
+      const utmParams = getStoredUTMParams();
       const { data, error } = await supabase.functions.invoke('create-pix', {
         body: {
-          value: 890, // R$ 8,90 em centavos
+          value: 890,
           plan_name: 'Liberação de Conteúdos',
+          tracking_params: utmParams,
         },
       });
 
