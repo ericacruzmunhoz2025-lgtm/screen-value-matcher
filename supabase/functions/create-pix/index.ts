@@ -205,10 +205,10 @@ serve(async (req) => {
     const amountInReais = parseFloat((value / 100).toFixed(2));
 
     // Criar PIX via endpoint CashIn conforme documentação
-    const cashInPayload = {
+    // Testar sem webhook primeiro
+    const cashInPayload: Record<string, unknown> = {
       amount: amountInReais,
-      description: plan_name || 'Pagamento PIX',
-      webhook_url: webhookUrl,
+      description: 'Pagamento',
     };
 
     console.log('Enviando para SyncPay CashIn:', JSON.stringify(cashInPayload));
