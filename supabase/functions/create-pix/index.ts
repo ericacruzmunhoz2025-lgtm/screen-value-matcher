@@ -13,7 +13,6 @@ const getAllowedOrigins = (): string[] => {
     return [...defaultOrigins, ...envOrigins.split(',').map(o => o.trim())];
   }
   
-  // Em desenvolvimento/preview, permitir localhost e subdomínios lovable
   return [
     ...defaultOrigins,
     'http://localhost:5173',
@@ -26,7 +25,6 @@ const getCorsHeaders = (req: Request): Record<string, string> => {
   const origin = req.headers.get('origin') || '';
   const allowedOrigins = getAllowedOrigins();
   
-  // Verificar se a origem é permitida ou é um subdomínio lovable
   const isAllowed = allowedOrigins.includes(origin) || 
     origin.endsWith('.lovable.app') || 
     origin.endsWith('.lovable.dev') ||
@@ -140,31 +138,34 @@ serve(async (req) => {
       );
     }
 
-    const apiKey = Deno.env.get('PUSHINPAY_API_KEY');
+    const publicKey = Deno.env.get('SYNCPAY_PUBLIC_KEY');
+    const secretKey = Deno.env.get('SYNCPAY_SECRET_KEY');
     
-    if (!apiKey) {
-      console.error('PUSHINPAY_API_KEY não configurada');
+    if (!publicKey || !secretKey) {
+      console.error('SYNCPAY keys não configuradas');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Criando PIX PushinPay para plano: ${plan_name}, valor: ${value} centavos`);
+    console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: ${value} centavos`);
     console.log('Tracking params recebidos:', JSON.stringify(tracking_params || {}));
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/pushinpay-webhook`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
 
-    // PushinPay usa valor em centavos (string)
-    const response = await fetch('https://api.pushinpay.com.br/api/pix/cashIn', {
+    // SyncPay API - valor em centavos
+    const response = await fetch('https://api.syncpay.com.br/v1/transactions/pix', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${secretKey}`,
+        'X-Public-Key': publicKey,
       },
       body: JSON.stringify({
-        value: value.toString(),
+        amount: value,
+        description: plan_name || 'Pagamento PIX',
         webhook_url: webhookUrl,
       }),
     });
@@ -172,18 +173,19 @@ serve(async (req) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('Erro na API PushinPay:', data);
+      console.error('Erro na API SyncPay:', data);
       return new Response(
-        JSON.stringify({ error: data.message || 'Erro ao gerar PIX' }),
+        JSON.stringify({ error: data.message || data.error || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Resposta PushinPay:', JSON.stringify(data));
+    console.log('Resposta SyncPay:', JSON.stringify(data));
 
-    const transactionId = data.id;
-    const qrCode = data.qr_code;
-    const qrCodeBase64 = data.qr_code_base64;
+    // SyncPay retorna: id, qr_code (código copia e cola), qr_code_base64, status
+    const transactionId = data.id || data.transaction_id;
+    const qrCode = data.qr_code || data.pix_code || data.code;
+    const qrCodeBase64 = data.qr_code_base64 || data.qr_code_image;
 
     console.log('PIX criado com sucesso:', transactionId);
 
@@ -198,7 +200,7 @@ serve(async (req) => {
         plan_name: plan_name,
         value: value,
         status: 'pending',
-        payload: { tracking_params: tracking_params || {} },
+        payload: { tracking_params: tracking_params || {}, provider: 'syncpay' },
       });
 
     // Enviar pedido pendente para UTMify
