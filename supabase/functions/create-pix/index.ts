@@ -16,34 +16,6 @@ interface TrackingParams {
   sck?: string | null;
 }
 
-// Obter token de autenticação SyncPay
-async function getSyncPayToken(clientId: string, clientSecret: string): Promise<string | null> {
-  try {
-    const response = await fetch('https://api.syncpayments.com.br/api/partner/v1/auth-token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Erro ao obter token SyncPay:', response.status, errorText);
-      return null;
-    }
-
-    const data = await response.json();
-    return data.token || data.access_token || data.bearer_token;
-  } catch (error) {
-    console.error('Erro ao obter token SyncPay:', error);
-    return null;
-  }
-}
-
 // Enviar pedido pendente para UTMify
 async function sendPendingOrderToUtmify(
   apiKey: string,
@@ -133,85 +105,50 @@ serve(async (req) => {
       );
     }
 
-    const clientId = Deno.env.get('SYNCPAY_CLIENT_ID');
-    const clientSecret = Deno.env.get('SYNCPAY_CLIENT_SECRET');
+    const apiKey = Deno.env.get('PUSHINPAY_API_KEY');
     
-    if (!clientId || !clientSecret) {
-      console.error('SyncPay credentials não configuradas');
+    if (!apiKey) {
+      console.error('PUSHINPAY_API_KEY não configurada');
       return new Response(
         JSON.stringify({ error: 'API não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Criando PIX SyncPay para plano: ${plan_name}, valor: ${value} centavos`);
+    console.log(`Criando PIX PushinPay para plano: ${plan_name}, valor: ${value} centavos`);
     console.log('Tracking params recebidos:', JSON.stringify(tracking_params || {}));
 
-    // Obter token de autenticação
-    const token = await getSyncPayToken(clientId, clientSecret);
-    if (!token) {
-      return new Response(
-        JSON.stringify({ error: 'Falha na autenticação com SyncPay' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Token SyncPay obtido com sucesso');
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const webhookUrl = `${supabaseUrl}/functions/v1/syncpay-webhook`;
+    const webhookUrl = `${supabaseUrl}/functions/v1/pushinpay-webhook`;
 
-    // SyncPay usa valor em reais (float)
-    const valueInReais = value / 100;
-
-    // Criar PIX usando o endpoint v1/gateway/api
-    const response = await fetch('https://api.syncpayments.com.br/v1/gateway/api', {
+    // PushinPay usa valor em centavos (string)
+    const response = await fetch('https://api.pushinpay.com.br/api/pix/cashIn', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        ip: "127.0.0.1",
-        pix: {
-          expiresInDays: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        },
-        items: [
-          {
-            title: plan_name,
-            quantity: 1,
-            tangible: false,
-            unitPrice: valueInReais,
-          },
-        ],
-        amount: valueInReais,
-        customer: {
-          cpf: "00000000000",
-          name: "Cliente PIX",
-          email: "cliente@pix.com",
-          phone: "11999999999",
-          externaRef: `${plan_name}-${Date.now()}`,
-        },
-        traceable: true,
-        postbackUrl: webhookUrl,
+        value: value.toString(),
+        webhook_url: webhookUrl,
       }),
     });
 
     const data = await response.json();
 
-    if (!response.ok || data.status === 'error') {
-      console.error('Erro na API SyncPay:', data);
+    if (!response.ok) {
+      console.error('Erro na API PushinPay:', data);
       return new Response(
         JSON.stringify({ error: data.message || 'Erro ao gerar PIX' }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Resposta SyncPay:', JSON.stringify(data));
+    console.log('Resposta PushinPay:', JSON.stringify(data));
 
-    const transactionId = data.idTransaction || data.transaction_id || data.id;
-    const qrCode = data.paymentCode || data.qr_code || data.pix_copia_cola;
-    const qrCodeBase64 = data.paymentCodeBase64;
+    const transactionId = data.id;
+    const qrCode = data.qr_code;
+    const qrCodeBase64 = data.qr_code_base64;
 
     console.log('PIX criado com sucesso:', transactionId);
 
@@ -237,10 +174,9 @@ serve(async (req) => {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
     }
 
-    // Gerar QR code URL se não vier base64
+    // Gerar QR code URL
     let qrCodeUrl = qrCodeBase64;
     if (qrCodeBase64 && !qrCodeBase64.startsWith('http') && !qrCodeBase64.startsWith('data:')) {
-      // É base64 puro, converter para data URL
       qrCodeUrl = `data:image/png;base64,${qrCodeBase64}`;
     } else if (!qrCodeUrl && qrCode) {
       qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrCode)}`;
