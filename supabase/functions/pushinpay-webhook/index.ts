@@ -26,7 +26,7 @@ const mapPushinPayStatus = (status: string): string => {
 const mapStatusToUtmify = (status: string): string | null => {
   const utmifyStatusMap: Record<string, string> = {
     'pending': 'waiting_payment',
-    'paid': 'approved',
+    'paid': 'paid',
   };
   return utmifyStatusMap[status] || null;
 };
@@ -56,8 +56,8 @@ async function sendToUtmify(
       approvedDate: utmifyStatus === 'approved' ? new Date().toISOString() : null,
       refundedAt: null,
       customer: {
-        name: null,
-        email: null,
+        name: "Cliente PIX",
+        email: "cliente@pix.com",
         phone: null,
         document: null,
         country: "BR",
@@ -77,16 +77,25 @@ async function sendToUtmify(
         gatewayFeeInCents: 0,
         userCommissionInCents: value,
       },
+      trackingParameters: {
+        src: null,
+        sck: null,
+        utm_source: null,
+        utm_campaign: null,
+        utm_medium: null,
+        utm_content: null,
+        utm_term: null,
+      },
       isTest: false,
     };
 
     console.log('Enviando para UTMify:', JSON.stringify(payload));
 
-    const response = await fetch('https://api.utmify.com.br/api/v1/orders', {
+    const response = await fetch('https://api.utmify.com.br/api-credentials/orders', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-token': apiKey,
       },
       body: JSON.stringify(payload),
     });
