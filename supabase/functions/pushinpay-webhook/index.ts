@@ -37,7 +37,8 @@ async function sendToUtmify(
   transactionId: string,
   status: string,
   value: number,
-  planName: string
+  planName: string,
+  trackingParams?: Record<string, string | null>
 ) {
   const utmifyStatus = mapStatusToUtmify(status);
   
@@ -53,7 +54,7 @@ async function sendToUtmify(
       paymentMethod: "pix",
       status: utmifyStatus,
       createdAt: new Date().toISOString(),
-      approvedDate: utmifyStatus === 'approved' ? new Date().toISOString() : null,
+      approvedDate: utmifyStatus === 'paid' ? new Date().toISOString() : null,
       refundedAt: null,
       customer: {
         name: "Cliente PIX",
@@ -78,13 +79,13 @@ async function sendToUtmify(
         userCommissionInCents: value,
       },
       trackingParameters: {
-        src: null,
-        sck: null,
-        utm_source: null,
-        utm_campaign: null,
-        utm_medium: null,
-        utm_content: null,
-        utm_term: null,
+        src: trackingParams?.src || null,
+        sck: trackingParams?.sck || null,
+        utm_source: trackingParams?.utm_source || null,
+        utm_campaign: trackingParams?.utm_campaign || null,
+        utm_medium: trackingParams?.utm_medium || null,
+        utm_content: trackingParams?.utm_content || null,
+        utm_term: trackingParams?.utm_term || null,
       },
       isTest: false,
     };
@@ -148,10 +149,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verificar se a transação existe e buscar dados completos
+    // Verificar se a transação existe e buscar dados completos incluindo tracking params
     const { data: existingPayment, error: fetchError } = await supabase
       .from('pix_payments')
-      .select('id, status, value, plan_name')
+      .select('id, status, value, plan_name, payload')
       .eq('transaction_id', transactionId)
       .single();
 
@@ -184,12 +185,18 @@ serve(async (req) => {
       );
     }
 
-    // Atualizar status do pagamento
+    // Extrair tracking params ANTES de atualizar o payload
+    const savedPayload = existingPayment.payload as Record<string, unknown> | null;
+    const trackingParams = savedPayload?.tracking_params as Record<string, string | null> | undefined;
+    
+    console.log('Tracking params recuperados:', JSON.stringify(trackingParams || {}));
+
+    // Atualizar status do pagamento - preservando tracking_params
     const { error } = await supabase
       .from('pix_payments')
       .update({
         status: status,
-        payload: payload,
+        payload: { ...payload, tracking_params: trackingParams || {} },
         updated_at: new Date().toISOString(),
       })
       .eq('transaction_id', transactionId);
@@ -212,7 +219,8 @@ serve(async (req) => {
         transactionId,
         status,
         existingPayment.value,
-        existingPayment.plan_name
+        existingPayment.plan_name,
+        trackingParams
       );
     } else {
       console.log('UTMIFY_API_KEY não configurado, pulando envio para UTMify');
