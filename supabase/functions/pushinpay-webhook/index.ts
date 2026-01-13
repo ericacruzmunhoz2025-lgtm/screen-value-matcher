@@ -1,10 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// Webhooks não precisam de CORS - são chamadas server-to-server
 
 // Mapear status do PushinPay para nosso formato
 const mapPushinPayStatus = (status: string): string => {
@@ -114,14 +111,11 @@ async function sendToUtmify(
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+  // Webhooks só aceitam POST
   if (req.method !== 'POST') {
     return new Response(
       JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 405, headers: { 'Content-Type': 'application/json' } }
     );
   }
 
@@ -138,7 +132,7 @@ serve(async (req) => {
       console.error('Payload inválido - faltando id ou status');
       return new Response(
         JSON.stringify({ error: 'Invalid payload structure' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -160,7 +154,7 @@ serve(async (req) => {
       console.error('Transação não encontrada:', transactionId);
       return new Response(
         JSON.stringify({ error: 'Transaction not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -181,7 +175,7 @@ serve(async (req) => {
       console.log('Ignorando downgrade de status:', existingPayment.status, '->', status);
       return new Response(
         JSON.stringify({ success: true, message: 'Status unchanged' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -205,7 +199,7 @@ serve(async (req) => {
       console.error('Erro ao salvar status:', error);
       return new Response(
         JSON.stringify({ error: 'Failed to update payment' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
@@ -228,14 +222,14 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({ success: true }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { headers: { 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
     console.error('Erro no webhook:', error);
     return new Response(
       JSON.stringify({ error: 'Internal error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
 });

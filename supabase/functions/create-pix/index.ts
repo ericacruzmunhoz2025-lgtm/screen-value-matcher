@@ -1,9 +1,42 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Lista de origens permitidas
+const getAllowedOrigins = (): string[] => {
+  const envOrigins = Deno.env.get('ALLOWED_ORIGINS');
+  const defaultOrigins = [
+    'https://lovable.dev',
+    'https://lovable.app',
+  ];
+  
+  if (envOrigins) {
+    return [...defaultOrigins, ...envOrigins.split(',').map(o => o.trim())];
+  }
+  
+  // Em desenvolvimento/preview, permitir localhost e subdomínios lovable
+  return [
+    ...defaultOrigins,
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+  ];
+};
+
+const getCorsHeaders = (req: Request): Record<string, string> => {
+  const origin = req.headers.get('origin') || '';
+  const allowedOrigins = getAllowedOrigins();
+  
+  // Verificar se a origem é permitida ou é um subdomínio lovable
+  const isAllowed = allowedOrigins.includes(origin) || 
+    origin.endsWith('.lovable.app') || 
+    origin.endsWith('.lovable.dev') ||
+    origin.endsWith('.lovableproject.com');
+  
+  return {
+    'Access-Control-Allow-Origin': isAllowed ? origin : allowedOrigins[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
 };
 
 interface TrackingParams {
@@ -91,6 +124,8 @@ async function sendPendingOrderToUtmify(
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+  
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
